@@ -5,15 +5,14 @@ import java.io.InputStream;
 import java.io.OutputStream;
 import java.nio.channels.Channels;
 import java.nio.channels.Pipe;
+import java.util.regex.Pattern;
 
-import junit.framework.Assert;
-
+import org.apache.log4j.Level;
 import org.junit.After;
 import org.junit.AfterClass;
 import org.junit.Before;
 import org.junit.BeforeClass;
 import org.junit.Test;
-
 
 /**
  * JUnit Tests for Expect. Using a pipe and another thread to simulate bytes
@@ -72,18 +71,88 @@ public class TestExpect {
 			}
 		}).start();
 		
+		Expect.addLogToConsole(Level.ALL);
+		
 		Expect expect = new Expect(in, new NullOutputStream());
-		expect.expectLiteral(10, ".*llo");
-		Assert.assertEquals("hello", expect.match);
-		expect.expectLiteral(5, "world");
-		Assert.assertEquals(null, expect.match);
-		expect.expectLiteral(20, "world");
-		Assert.assertEquals("world", expect.match);
+		expect.expect(10, Pattern.compile(".*llo"));
+		assertEquals("hello", expect.match);
+		int retv = expect.expect(5, "world");
+		assertNull(expect.match);
+		assertEquals(retv, Expect.RETV_TIMEOUT);
+		expect.expect(20, "world");
+		assertEquals("world", expect.match);
+		expect.expectEOF(60);
+		assertTrue(expect.isSuccess);
 		expect.close();
+		
+		Expect.turnOffLogging();
 	}
 	
 	/**
-	 * test resetting timeout when receives anything from InputStream
+	 * see if expect will timeout even if InputStream keeps receiving bytes. The
+	 * thread keeps sending "hello" for 2 seconds, expect will timeout in 1
+	 * seconds.
+	 */
+	@Test
+	public void testTimeout(){
+		final Pipe pipe;
+		try {
+			pipe = Pipe.open();
+		} catch (IOException e) {
+			e.printStackTrace();
+			fail("failed to open pipe!");
+			return;
+		}
+		final InputStream in = Channels.newInputStream(pipe.source());
+		final OutputStream out = Channels.newOutputStream(pipe.sink());
+		
+		/** send "hello" for 2 seconds*/
+		final Thread writeThread = new Thread(new Runnable() {
+			@Override
+			public void run() {
+				try {
+					while (true) {
+						if (Thread.interrupted())
+							break;
+						out.write("hello".getBytes());
+					}
+					// Once the current thread is interrupted, the out channel is closed.
+					// see ClosedByInterruptException
+					// so this will not work.
+					//out.write("world".getBytes());
+				} catch (IOException e) {
+					e.printStackTrace();
+				} finally {
+					try { out.close(); } catch (IOException e) {}
+				}
+			}
+		});
+		writeThread.start();
+		new Thread(new Runnable() {
+			@Override
+			public void run() {
+				try {
+					Thread.sleep(2000);
+				} catch (InterruptedException e) {}
+				writeThread.interrupt();
+			}
+		}).start();
+		
+		Expect expect = new Expect(in, new NullOutputStream());
+		int retv = expect.expect(1, "world");
+		assertNull(expect.match);
+		assertEquals(retv, Expect.RETV_TIMEOUT);
+		//expect.expect(100, "world");
+		//Assert.assertNotNull(expect.match);
+		expect.expectEOF(60);
+		assertTrue(expect.isSuccess);
+		expect.close();
+	}
+
+	/**
+	 * test resetting timeout when receives anything from InputStream. "!" is
+	 * sent after 15 seconds, expect times out in 10 seconds. Because there are
+	 * new bytes every 5 seconds, it will not timeout.
 	 */
 	@Test
 	public void testRestart_timeout_upon_receive(){
@@ -118,101 +187,184 @@ public class TestExpect {
 		
 		Expect expect = new Expect(in, new NullOutputStream());
 		expect.setRestart_timeout_upon_receive(true);
-		expect.expectLiteral(10, "!");
-		Assert.assertEquals("!", expect.match);
+		expect.expect(10, "!");
+		assertEquals("!", expect.match);
 		expect.close();
 	}
-
-	// @Test
-	public void originalMainTest() {
+	
+	/**
+	 * test expecting multiple patterns, (String will be treated as literal)
+	 */
+	@Test
+	public void testMultipleExpect(){
 		final Pipe pipe;
 		try {
 			pipe = Pipe.open();
-
-		} catch (IOException e2) {
-			e2.printStackTrace();
+		} catch (IOException e) {
+			e.printStackTrace();
+			fail("failed to open pipe!");
 			return;
 		}
 		final InputStream in = Channels.newInputStream(pipe.source());
-		OutputStream out = Channels.newOutputStream(pipe.sink());
+		final OutputStream out = Channels.newOutputStream(pipe.sink());
 		
-		
-		//final PipedInputStream in = new PipedInputStream();
 		new Thread(new Runnable() {
 			@Override
 			public void run() {
 				try {
-					Expect expect = new Expect(in, System.out);
-					expect.setRestart_timeout_upon_receive(true);
-					expect.expectLiteral(10, "!");
-					System.out.println("Before: " + expect.before);
-					System.out.println("Match: " + expect.match);
-					expect.expect( "x");
-					System.out.println("Before: " + expect.before);
-					System.out.println("Match: " + expect.match);
-					expect.expect( "x");
-					System.out.println("Before: " + expect.before);
-					System.out.println("Match: " + expect.match);
-					
-					/*expect.expect(10, "llo");
-					System.out.println("Before: " + expect.before);
-					System.out.println("Match: " + expect.match);
-					expect.expect("ld");
-					System.out.println("Before: " + expect.before);
-					System.out.println("Match: " + expect.match);
-					expect.expect("!");
-					System.out.println("Before: " + expect.before);
-					System.out.println("Match: " + expect.match);*/
-					
-					expect.close();
-					/*
-					expect.expect("ld");
-					System.out.println("Before: " + expect.before);
-					System.out.println("Match: " + expect.match);*/
-				} finally{
-					/**
-					 * should not close here, the thread which reads from "in"
-					 * is the daemon piping thread in Expect
-					 * try {
-						in.close();
-					} catch (IOException e) {
-						e.printStackTrace();
-					}*/
+					out.write("hello".getBytes());
+					sleep(5);
+					out.write(" world".getBytes());
+				} catch (IOException e) {
+					e.printStackTrace();
+				} finally {
+					try { out.close(); } catch (IOException e) {}
 				}
 			}
 		}).start();
-		//PipedOutputStream out = null;
+		
+		Expect.addLogToConsole(Level.ALL);
+		
+		Expect expect = new Expect(in, new NullOutputStream());
+		int retv = expect.expect(Pattern.compile(".*llo"), " wor");
+		assertEquals("hello", expect.match);
+		assertEquals(retv, 0);
+		
+		retv = expect.expect(Pattern.compile(".*llo"), " wor");
+		assertEquals(" wor", expect.match);
+		assertEquals(retv, 1);
+		
+		expect.expectEOF();
+		expect.close();
+		
+		Expect.turnOffLogging();
+	}
+	
+	/**
+	 * test expectEOF
+	 */
+	@Test
+	public void testExpectEOF(){
+		final Pipe pipe;
 		try {
-			
-			//out= new PipedOutputStream(in);
-			try {
-				Thread.sleep(5000);
-			} catch (InterruptedException e) {
-				e.printStackTrace();
-			}
-			out.write("hello".getBytes());
-			try {
-				Thread.sleep(5000);
-			} catch (InterruptedException e) {
-				e.printStackTrace();
-			}
-			out.write(" world".getBytes());
-			try {
-				Thread.sleep(5000);
-			} catch (InterruptedException e) {
-				e.printStackTrace();
-			}
-			out.write("!".getBytes());
-
+			pipe = Pipe.open();
 		} catch (IOException e) {
 			e.printStackTrace();
-		} finally{
-			try {
-				out.close();
-			} catch (IOException e) {
-				e.printStackTrace();
-			}
+			fail("failed to open pipe!");
+			return;
 		}
+		final InputStream in = Channels.newInputStream(pipe.source());
+		final OutputStream out = Channels.newOutputStream(pipe.sink());
+		
+		new Thread(new Runnable() {
+			@Override
+			public void run() {
+				try {
+					out.write("hello".getBytes());
+					out.write(" world!".getBytes());
+				} catch (IOException e) {
+					e.printStackTrace();
+				} finally {
+					try { out.close(); } catch (IOException e) {}
+				}
+			}
+		}).start();
+		
+		
+		Expect expect = new Expect(in, new NullOutputStream());
+		
+		int retv = expect.expectEOF();
+		assertEquals(retv, Expect.RETV_EOF);
+		assertEquals("hello world!", expect.before);
+		assertTrue(expect.isSuccess);
+		
+		retv = expect.expectEOF();
+		assertEquals(retv, Expect.RETV_EOF);
+		assertEquals("", expect.before);
+		assertTrue(expect.isSuccess);
+		
+		expect.close();
+	}
+	
+	/**
+	 * test throwing EOFException
+	 */
+	@Test(expected = Expect.EOFException.class)
+	public void testEOFException() throws Expect.TimeoutException,
+			Expect.EOFException, IOException {
+		final Pipe pipe;
+		try {
+			pipe = Pipe.open();
+		} catch (IOException e) {
+			e.printStackTrace();
+			fail("failed to open pipe!");
+			return;
+		}
+		final InputStream in = Channels.newInputStream(pipe.source());
+		final OutputStream out = Channels.newOutputStream(pipe.sink());
+		
+		new Thread(new Runnable() {
+			@Override
+			public void run() {
+				try {
+					out.write("hello".getBytes());
+					out.write(" world!".getBytes());
+				} catch (IOException e) {
+					e.printStackTrace();
+				} finally {
+					try { out.close(); } catch (IOException e) {}
+				}
+			}
+		}).start();
+		
+		
+		Expect expect = new Expect(in, new NullOutputStream());
+		
+		expect.chkExpect("nomatch");
+		expect.expectEOF();
+		
+		expect.close();
+	}
+	
+	/**
+	 * test throwing TimeoutException
+	 */
+	@Test(expected = Expect.TimeoutException.class)
+	public void testTimeoutException() throws Expect.TimeoutException,
+			Expect.EOFException, IOException {
+		final Pipe pipe;
+		try {
+			pipe = Pipe.open();
+		} catch (IOException e) {
+			e.printStackTrace();
+			fail("failed to open pipe!");
+			return;
+		}
+		final InputStream in = Channels.newInputStream(pipe.source());
+		final OutputStream out = Channels.newOutputStream(pipe.sink());
+		
+		new Thread(new Runnable() {
+			@Override
+			public void run() {
+				try {
+					sleep(10);
+					out.write("hello".getBytes());
+					out.write(" world!".getBytes());
+				} catch (IOException e) {
+					e.printStackTrace();
+				} finally {
+					try { out.close(); } catch (IOException e) {}
+				}
+			}
+		}).start();
+		
+		
+		Expect expect = new Expect(in, new NullOutputStream());
+		
+		expect.chkExpect(5, "hello");
+		expect.expectEOF();
+		
+		expect.close();
 	}
 	
 	public static void sleep(int sec) {

@@ -6,8 +6,17 @@ import java.nio.channels.Channels;
 import java.nio.channels.Pipe;
 import java.nio.channels.SelectionKey;
 import java.nio.channels.Selector;
+import java.util.ArrayList;
+import java.util.List;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
+
+import org.apache.log4j.ConsoleAppender;
+import org.apache.log4j.FileAppender;
+import org.apache.log4j.Layout;
+import org.apache.log4j.Level;
+import org.apache.log4j.Logger;
+import org.apache.log4j.PatternLayout;
 
 
 /**
@@ -17,7 +26,7 @@ import java.util.regex.Pattern;
  * process by providing a comamnd String.
  * <br>
  * <br>
- * When designing the API, I used the Perl Expect library for reference: 
+ * The API is loosely based on Perl Expect library: 
  * <a href="http://search.cpan.org/~rgiersig/Expect-1.15/Expect.pod">
  * http://search.cpan.org/~rgiersig/Expect-1.15/Expect.pod</a>
  * 
@@ -29,9 +38,14 @@ import java.util.regex.Pattern;
  * @author Ronnie Dong
  */
 public class Expect {
+	static final Logger log = Logger.getLogger(Expect.class);
+	/**Logging is turned off by default.*/
+	static {
+		log.setLevel(Level.OFF);
+	}
 	
-	OutputStream output;
-	Pipe.SourceChannel inputChannel;
+	private OutputStream output;
+	private Pipe.SourceChannel inputChannel;
 	
 	private Selector selector;
 	
@@ -41,7 +55,8 @@ public class Expect {
 			selector = Selector.open();
 			inputChannel.register(selector, SelectionKey.OP_READ);
 		} catch (IOException e) {
-			e.printStackTrace();
+			log.fatal("Fatal error when initializing pipe or selector", e);
+			//e.printStackTrace();
 		}
 		this.output = output;
 	}
@@ -73,32 +88,46 @@ public class Expect {
 				try {
 					for (int n = 0; n != -1; n = input.read(buffer))
 						out.write(buffer, 0, n);
+					log.debug("EOF from InputStream");
 					input.close();		// now that input has EOF, close it.
 										// other than this, do not close input
 				} catch (IOException e) {
-					e.printStackTrace();
+					log.warn("IOException when piping from InputStream, "
+							+ "now the piping thread will end", e);
+					//e.printStackTrace();
 				} finally {
 					try {
-						//LOG
+						log.debug("closing sink of the pipe");
 						out.close();
 					} catch (IOException e) {
 					}
 				}
 			}
 		});
-		piping.setName("Piping InputStream to a SelectableChannel");
+		piping.setName("Piping InputStream to SelectableChannel Thread");
 		piping.setDaemon(true);
 		piping.start();
 		return pipe.source();
+	}
+	
+	private Process process = null;
+	/**
+	 * @return the spawned process, if this {@link Expect} object is created by
+	 *         spawning a process
+	 */
+	public Process getProcess() {
+		return process;
 	}
 	
 	/**
 	 * Creates an Expect object by spawning a command.<br>
 	 * To Linux users, perhaps you need to use "bash -i" if you want to spawn
 	 * Bash.<br>
+	 * Note: error stream of the process is redirected to output stream.
 	 * 
 	 * @param command
-	 * @return
+	 * @return Expect object created using the input and output handles from the
+	 *         spawned process
 	 */
 	public static Expect spawn(String command) {
 		ProcessBuilder pb = new ProcessBuilder(command.split(" "));
@@ -107,10 +136,13 @@ public class Expect {
 		try {
 			p = pb.start();
 		} catch (IOException e) {
-			e.printStackTrace();
+			//e.printStackTrace();
+			log.error("Error when spawning command: " + command, e);
 			return null;
 		}
-		return new Expect(p.getInputStream(), p.getOutputStream());
+		Expect retv = new Expect(p.getInputStream(), p.getOutputStream());
+		retv.process = p;
+		return retv;
 	}
 	
 	/**
@@ -126,98 +158,224 @@ public class Expect {
 	 * Write a byte array to the output handle, notice flush()
 	 */
 	public void send(byte[] toWrite) {
-		System.out.println("sending: " + bytesToPrintableString(toWrite));
+		//System.out.println("sending: " + bytesToPrintableString(toWrite));
+		log.info("sending: " + bytesToPrintableString(toWrite));
 		try {
 			output.write(toWrite);
 			output.flush();
 		} catch (IOException e) {
-			e.printStackTrace();
+			log.error("Error when sending bytes to output", e);
+			//e.printStackTrace();
 		}
 	}
 
-	int default_timeout = 60;
-	boolean restart_timeout_upon_receive = false;
-	StringBuffer buffer = new StringBuffer();
-	String before;
-	String match;
-
-	boolean isSuccess = false;
+	private int default_timeout = 60;
+	private boolean restart_timeout_upon_receive = false;
+	private StringBuffer buffer = new StringBuffer();
 	
-	public void expectLiteral(String literal) {
-		expect(Pattern.quote(literal)); // requires 1.5 and up
-	}
-
-	public void expectLiteral(int timeout, String literal) {
-		expect(timeout, Pattern.quote(literal));
-	}
-
-	public void expect(String expect) {
-		expect(default_timeout, expect);
+	/**String before the last match(if there was a match),
+	 *  updated after each expect() call*/
+	public String before;
+	/**String representing the last match(if there was a match),
+	 *  updated after each expect() call*/
+	public String match;
+	/**Whether the last match was successful,
+	 *  updated after each expect() call*/
+	public boolean isSuccess = false;
+	
+	public static final int RETV_TIMEOUT = -1, RETV_EOF = -2,
+			RETV_IOEXCEPTION = -9;
+	
+	/**
+	 * Convenience method, same as calling {@link #expect(int, Object...)
+	 * expect(default_timeout, patterns)}
+	 * 
+	 * @param patterns
+	 * @return
+	 */
+	public int expect(Object... patterns) {
+		return expect(default_timeout, patterns);
 	}
 
 	/**
-	 * Expect will wait for the input handle to produce the pattern. If a match
-	 * is found, this method returns immediately; otherwise, the methods waits
-	 * for up to timeout seconds, then returns. If timeout is less than or equal
-	 * to 0 Expect will check one time to see if the internal buffer contains
-	 * the pattern.
+	 * Convenience method, internally it constructs a List{@literal <Pattern>}
+	 * using the object array, and call {@link #expect(int, List) } using the
+	 * List. The {@link String}s in the object array will be treated as
+	 * literals; meanwhile {@link Pattern}s will be directly added to the List.
+	 * If the array contains other objects, they will be discarded.
+	 * 
+	 * @param patterns
+	 * @return
+	 */
+	public int expect(int timeout, Object... patterns) {
+		ArrayList<Pattern> list = new ArrayList<Pattern>();
+		for (Object o : patterns) {
+			if (o instanceof String)
+				list.add(Pattern.compile(Pattern.quote((String) o))); // requires 1.5 and up
+			else if (o instanceof Pattern)
+				list.add((Pattern) o);
+			else
+				log.warn("Object " + o.toString() + " (class: "
+						+ o.getClass().getName() + ") is neither a String nor "
+						+ "a java.util.regex.Pattern, ignored");
+		}
+		return expect(timeout, list);
+	}
+	
+	/**
+	 * Expect will wait for the input handle to produce one of the patterns in
+	 * the list. If a match is found, this method returns immediately;
+	 * otherwise, the methods waits for up to timeout seconds, then returns. If
+	 * timeout is less than or equal to 0 Expect will check one time to see if
+	 * the internal buffer contains the pattern.
 	 * 
 	 * @param timeout
 	 *            timeout in seconds
-	 * @param pattern
-	 *            string representation of a regular expression used for
-	 *            matching
+	 * @param list
+	 *            List of Java {@link Pattern}s used for match the internal
+	 *            buffer obtained by reading the InputStream
+	 * @return position of the matched pattern within the list (starting from
+	 *         0); or a negative number if there is an IOException, EOF or
+	 *         timeout
 	 */
-	public void expect(int timeout, String pattern) {
-		clearMatch();
+	public int expect(int timeout, List<Pattern> list) {
+		log.debug("Expecting " + list);
+		
+		clearGlobalVariables();
 		long endTime = System.currentTimeMillis() + timeout * 1000;
 		
 		try {
 			ByteBuffer bytes = ByteBuffer.allocate(1024);
 			int n;
 			while (true) {
-				Pattern p = Pattern.compile(pattern);
-				Matcher m = p.matcher(buffer);
-				if (m.find()) {
-					int matchStart = m.start(), matchEnd = m.end();
-					this.before = buffer.substring(0, matchStart);
-					this.match = m.group();
-					this.isSuccess = true;
-					buffer.delete(0, matchEnd);
-					return;
+				for (int i = 0; i < list.size(); i++) {
+					log.trace("trying to match " + list.get(i)
+							+ " against buffer \"" + buffer + "\"");
+					Matcher m = list.get(i).matcher(buffer);
+					if (m.find()) {
+						log.trace("success!");
+						int matchStart = m.start(), matchEnd = m.end();
+						this.before = buffer.substring(0, matchStart);
+						this.match = m.group();
+						this.isSuccess = true;
+						buffer.delete(0, matchEnd);
+						return i;
+					}
 				}
 
 				long waitTime = endTime - System.currentTimeMillis();
 				if (restart_timeout_upon_receive)
 					waitTime = timeout * 1000;
-				if (waitTime <= 0)
-					return;
+				if (waitTime <= 0) {
+					log.debug("Timeout when expecting " + list);
+					return RETV_TIMEOUT;
+				}
 				//System.out.println("waiting for "+waitTime);
 
 				selector.select(waitTime);
 				//System.out.println(selector.selectedKeys().size());
 				if (selector.selectedKeys().size() == 0) {
-					System.err.println("timeout!");
-					break;	//we can directly "break" here
+					//System.err.println("timeout!");
+					//break;	//we can directly "break" here
+					log.debug("Timeout when expecting " + list);
+					return RETV_TIMEOUT;
 				}
 				selector.selectedKeys().clear();
 				if ((n = inputChannel.read(bytes)) == -1) {
-					System.err.println("EOF!");
-					break;
+					//System.err.println("EOF!");
+					//break;
+					log.debug("EOF when expecting " + list);
+					return RETV_EOF;
 				}
-				for (int i = 0; i < n; i++)
+				StringBuilder tmp = new StringBuilder();
+				for (int i = 0; i < n; i++) {
 					buffer.append((char) bytes.get(i));
+					tmp.append(byteToPrintableString(bytes.get(i)));
+				}
+				log.debug("Obtained following from InputStream: " + tmp);
 				bytes.clear();
 				
 				//System.out.println(buffer);
 			}
 		} catch (IOException e) {
-			e.printStackTrace();
+			//e.printStackTrace();
+			log.error("IOException when selecting or reading", e);
+			thrownIOE = e;
+			return RETV_IOEXCEPTION;
 		}
 		
 	}
+
+	/**
+	 * Convenience method, internally it calls {@link #expect(int, List)
+	 * expect(timeout, new ArrayList&lt;Pattern&gt;())}. Given an empty list,
+	 * {@link #expect(int, List)} will not perform any regex matching, therefore
+	 * the only conditions for it to return is EOF or timeout (or IOException).
+	 * If EOF is detected, {@link #isSuccess} and {@link #before} are properly
+	 * set.
+	 * 
+	 * @param timeout
+	 * @return same as return value of {@link #expect(int, List)}
+	 */
+	public int expectEOF(int timeout) {
+		int retv = expect(timeout, new ArrayList<Pattern>());
+		if (retv == RETV_EOF) {
+			this.isSuccess = true;
+			this.before = this.buffer.toString();
+			this.buffer.delete(0, buffer.length());
+		}
+		return retv;
+	}
+	/**Convenience method, same as calling {@link #expectEOF(int)
+	 * expectEOF(default_timeout)}*/
+	public int expectEOF() {
+		return expectEOF(default_timeout);
+	}
+
+	/**useful when calling chkExpect()*/
+	private IOException thrownIOE;
 	
-	private void clearMatch() {
+	/**
+	 * This method calls {@link #expect(int, Object...) expect(timeout,
+	 * patterns)}, and throws checked exceptions when expect was not successful.
+	 * Useful when you want to simplify error handling: for example, when you
+	 * send a series of commands to an SSH server, you expect a prompt after
+	 * each send, however the server may die or the prompt may take forever to
+	 * appear, you would want to skip the following commands if those occurred.
+	 * In such a case this method will be handy.
+	 * 
+	 * @param timeout
+	 * @param patterns
+	 * @throws TimeoutException
+	 *             when expect times out
+	 * @throws EOFException
+	 *             when EOF is encountered
+	 * @throws IOException
+	 *             when there is a problem reading from the InputStream
+	 * @return same as {@link #expect(int, Object...) expect(timeout, patterns)}
+	 */
+	public int chkExpect(int timeout, Object... patterns)
+			throws TimeoutException, EOFException, IOException {
+		int retv = expect(timeout, patterns);
+		switch (retv) {
+		case RETV_TIMEOUT:
+			throw new TimeoutException();
+		case RETV_EOF:
+			throw new EOFException();
+		case RETV_IOEXCEPTION:
+			throw thrownIOE;
+		default:
+			return retv;
+		}
+	}
+	/**Convenience method, same as calling {@link #chkExpect(int, Object...)
+	 * chkExpect(default_timeout, patterns)}*/
+	public int chkExpect(Object... patterns) throws TimeoutException,
+			EOFException, IOException {
+		return chkExpect(default_timeout, patterns);
+	}
+	
+	private void clearGlobalVariables() {
 		isSuccess = false;
 		match = null;
 		before = null;
@@ -238,12 +396,14 @@ public class Expect {
 		try {
 			this.output.close();
 		} catch (IOException e) {
-			e.printStackTrace();
+			log.warn("Exception when closing OutputStream", e);
+			//e.printStackTrace();
 		}
 		try {
 			this.inputChannel.close();
 		} catch (IOException e) {
-			e.printStackTrace();
+			log.warn("Exception when closing input Channel", e);
+			//e.printStackTrace();
 		}
 	}
 	
@@ -259,24 +419,61 @@ public class Expect {
 	public void setRestart_timeout_upon_receive(boolean restart_timeout_upon_receive) {
 		this.restart_timeout_upon_receive = restart_timeout_upon_receive;
 	}
-	public boolean isSuccess() {
-		return isSuccess;
-	}
 
+	/**
+	 * Static method used for convert byte array to string, each byte is
+	 * converted to an ASCII character, if the byte represents a control
+	 * character, it is replaced by a printable caret notation <a
+	 * href="http://en.wikipedia.org/wiki/ASCII">
+	 * http://en.wikipedia.org/wiki/ASCII </a>, or an escape code if possible.
+	 * 
+	 * @param bytes
+	 *            bytes to be printed
+	 * @return String representation of the byte array
+	 */
 	public static String bytesToPrintableString(byte[] bytes) {
 		StringBuilder sb = new StringBuilder();
-		for (byte b : bytes) {
-			String s = new String(new byte[] { b });
-			// control characters
-			if (b >= 0 && b < 32) s = "^" + (char) (b + 64);
-			else if (b == 127) s = "^?";
-			// some escape characters
-			if (b == 9) s = "\\t";
-			if (b == 10) s = "\\n";
-			if (b == 13) s = "\\r";
-			sb.append(s);
-		}
+		for (byte b : bytes)
+			sb.append(byteToPrintableString(b));
 		return sb.toString();
+	}
+	public static String byteToPrintableString(byte b) {
+		String s = new String(new byte[] { b });
+		// control characters
+		if (b >= 0 && b < 32) s = "^" + (char) (b + 64);
+		else if (b == 127) s = "^?";
+		// some escape characters
+		if (b == 9) s = "\\t";
+		if (b == 10) s = "\\n";
+		if (b == 13) s = "\\r";
+		return s;
+	}
+	
+	@SuppressWarnings("serial")
+	public static class TimeoutException extends Exception{
+	}
+	@SuppressWarnings("serial")
+	public static class EOFException extends Exception{
+	}
+	
+	private static Layout layout = new PatternLayout(
+			PatternLayout.TTCC_CONVERSION_PATTERN);
+
+	public static void addLogToConsole(Level level) {
+		log.setLevel(Level.ALL);
+		ConsoleAppender console = new ConsoleAppender(layout);
+		console.setThreshold(level);
+		log.addAppender(console);
+	}
+	public static void addLogToFile(String filename, Level level) throws IOException {
+		log.setLevel(Level.ALL);
+		FileAppender file = new FileAppender(layout, filename);
+		file.setThreshold(level);
+		log.addAppender(file);
+	}
+	public static void turnOffLogging(){
+		log.setLevel(Level.OFF);
+		log.removeAllAppenders();
 	}
 
 }
