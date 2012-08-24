@@ -29,11 +29,15 @@ Note Expect does not provide a "forever" timeout, you may use a very large integ
 
 Expect can expect for a list of patterns/strings at one time. However there is no callback, because in Java the code does not look neat (refer to expect4j examples)
 
-Expect does NOT expect on more than one connection at a time.
+The expect() method can handle a mixture of regular expression Pattern and literal String: in fact it accepts arbitrary number of Object, then uses Pattern as regex and uses String as literal string.
+
+Expect does NOT expect on more than one connection at a time (which IS a feature for Unix Expect/Perl Expect)
+
+Those methods that end with "OrThrow" will throw checked exceptions when something goes wrong, for example timeout or lost connection(EOF), or IOException caused by alien invasion. This helps handling unexpected results.
 
 Examples
 --------
-Example that connects to an SSH server and send "ls" command.
+Example that connects to an SSH server and send "ls" command. (assuming your prompt is `$`)
 ```java
 try {
 	JSch jsch = new JSch();
@@ -45,14 +49,14 @@ try {
 	Expect expect = new Expect(channel.getInputStream(),
 			channel.getOutputStream());
 	channel.connect();
-	expect.expect(Pattern.compile("\\Q$\\E\\s?"));
+	expect.expect("$");
 	System.out.println(expect.before + expect.match);
 	expect.send("ls\n");
-	expect.expect(Pattern.compile("\\Q$\\E\\s?"));
+	expect.expect("$");
 	System.out.println(expect.before + expect.match);
 	expect.send("exit\n");
 	expect.expectEOF();
-	System.out.println(expect.before + expect.match);
+	System.out.println(expect.before);
 	expect.close();
 	session.disconnect();
 } catch (JSchException e) {
@@ -60,6 +64,12 @@ try {
 } catch (IOException e) {
 	e.printStackTrace();
 }
+```
+You can substitute `expect.expect("$");` with `expect.expectOrThrow("$");`, and add `catch` clauses in the end.
+
+It is possible the prompt is either `$`, or `#` with/without a space:
+```java
+	expect.expect("$", Pattern.compile("#\\s?"));
 ```
 
 
@@ -80,3 +90,8 @@ In the source code there are too many unused classes.
 Notes
 -----
 Some advice if you want to implement Expect: avoid multi-threading as much as possible, you will find it not worth the efforts for such a program, where performance is not as important.
+
+
+Disclaimer
+----------
+THIS SOFTWARE IS PROVIDED ``AS IS'' AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE ARE DISCLAIMED. IN NO EVENT SHALL THE AUTHORS BE LIABLE FOR ANY DIRECT, INDIRECT, INCIDENTAL, SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES (INCLUDING, BUT NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES; LOSS OF USE, DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER CAUSED AND ON ANY THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.

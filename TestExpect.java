@@ -192,6 +192,46 @@ public class TestExpect {
 		expect.close();
 	}
 	
+	@Test
+	public void testNoTransfer(){
+		final Pipe pipe;
+		try {
+			pipe = Pipe.open();
+		} catch (IOException e) {
+			e.printStackTrace();
+			fail("failed to open pipe!");
+			return;
+		}
+		final InputStream in = Channels.newInputStream(pipe.source());
+		final OutputStream out = Channels.newOutputStream(pipe.sink());
+		
+		new Thread(new Runnable() {
+			@Override
+			public void run() {
+				try {
+					out.write("hello".getBytes());
+				} catch (IOException e) {
+					e.printStackTrace();
+				} finally {
+					try { out.close(); } catch (IOException e) {}
+				}
+			}
+		}).start();
+		
+		Expect expect = new Expect(in, new NullOutputStream());
+		expect.setNotransfer(true);
+		expect.expect("hello");
+		assertEquals("hello", expect.match);
+		expect.expect("hello");
+		assertEquals("hello", expect.match);
+		expect.setNotransfer(false);
+		expect.expect(5, "hello");
+		assertEquals("hello", expect.match);
+		expect.expect("hello");
+		assertNull(expect.match);
+		expect.close();
+	}
+	
 	/**
 	 * test expecting multiple patterns, (String will be treated as literal)
 	 */
@@ -320,7 +360,7 @@ public class TestExpect {
 		
 		Expect expect = new Expect(in, new NullOutputStream());
 		
-		expect.chkExpect("nomatch");
+		expect.expectOrThrow("nomatch");
 		expect.expectEOF();
 		
 		expect.close();
@@ -361,7 +401,7 @@ public class TestExpect {
 		
 		Expect expect = new Expect(in, new NullOutputStream());
 		
-		expect.chkExpect(5, "hello");
+		expect.expectOrThrow(5, "hello");
 		expect.expectEOF();
 		
 		expect.close();

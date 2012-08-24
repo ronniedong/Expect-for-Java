@@ -1,6 +1,7 @@
 import java.io.IOException;
 import java.io.InputStream;
 import java.io.OutputStream;
+import java.io.PrintStream;
 import java.nio.ByteBuffer;
 import java.nio.channels.Channels;
 import java.nio.channels.Pipe;
@@ -20,22 +21,28 @@ import org.apache.log4j.PatternLayout;
 
 
 /**
- * Provide an object that provide similar functions as Expect tool.<br>
- * There are two ways to create an Expect object: providing an
+ * Provides similar functions as the Unix Expect tool.<br>
+ * There are two ways to create an Expect object: a constructor that takes an
  * {@link InputStream} handle and {@link OutputStream} handle; or spawning a
- * process by providing a comamnd String.
+ * process by providing a comamnd String. <br>
  * <br>
- * <br>
- * The API is loosely based on Perl Expect library: 
+ * The API is loosely based on Perl Expect library:<br>
  * <a href="http://search.cpan.org/~rgiersig/Expect-1.15/Expect.pod">
  * http://search.cpan.org/~rgiersig/Expect-1.15/Expect.pod</a>
  * 
  * <br>
- * If you are not familiar with the Tcl version of Expect, take a look at: 
+ * If you are not familiar with the Tcl version of Expect, take a look at:<br>
  * <a href="http://oreilly.com/catalog/expect/chapter/ch03.html">
- * http://oreilly.com/catalog/expect/chapter/ch03.html</a>
+ * http://oreilly.com/catalog/expect/chapter/ch03.html</a> <br>
+ * <br>
+ * Expect uses a thread to convert InputStream to a SelectableChannel; other
+ * than this, no multi-threading is used.<br>
+ * A call to expect() will block for at most timeout seconds. Expect is not
+ * designed to be thread-safe, in other words, do not call methods of the same
+ * Expect object in different threads.
  * 
  * @author Ronnie Dong
+ * @version 1.1
  */
 public class Expect {
 	static final Logger log = Logger.getLogger(Expect.class);
@@ -86,8 +93,13 @@ public class Expect {
 				//LOG
 				byte[] buffer = new byte[1024];
 				try {
-					for (int n = 0; n != -1; n = input.read(buffer))
+					for (int n = 0; n != -1; n = input.read(buffer)) {
 						out.write(buffer, 0, n);
+						if (duplicatedTo != null) {
+							String toWrite = new String(buffer, 0, n);
+							duplicatedTo.append(toWrite);	// no Exception will be thrown
+						}
+					}
 					log.debug("EOF from InputStream");
 					input.close();		// now that input has EOF, close it.
 										// other than this, do not close input
@@ -172,6 +184,7 @@ public class Expect {
 	private int default_timeout = 60;
 	private boolean restart_timeout_upon_receive = false;
 	private StringBuffer buffer = new StringBuffer();
+	private boolean notransfer = false;
 	
 	/**String before the last match(if there was a match),
 	 *  updated after each expect() call*/
@@ -202,7 +215,8 @@ public class Expect {
 	 * using the object array, and call {@link #expect(int, List) } using the
 	 * List. The {@link String}s in the object array will be treated as
 	 * literals; meanwhile {@link Pattern}s will be directly added to the List.
-	 * If the array contains other objects, they will be discarded.
+	 * If the array contains other objects, they will be converted by
+	 * {@link #toString()} and then used as literal strings.
 	 * 
 	 * @param patterns
 	 * @return
@@ -214,10 +228,12 @@ public class Expect {
 				list.add(Pattern.compile(Pattern.quote((String) o))); // requires 1.5 and up
 			else if (o instanceof Pattern)
 				list.add((Pattern) o);
-			else
+			else{
 				log.warn("Object " + o.toString() + " (class: "
 						+ o.getClass().getName() + ") is neither a String nor "
-						+ "a java.util.regex.Pattern, ignored");
+						+ "a java.util.regex.Pattern, using as a literal String");
+				list.add(Pattern.compile(Pattern.quote(o.toString())));
+			}
 		}
 		return expect(timeout, list);
 	}
@@ -258,7 +274,7 @@ public class Expect {
 						this.before = buffer.substring(0, matchStart);
 						this.match = m.group();
 						this.isSuccess = true;
-						buffer.delete(0, matchEnd);
+						if(!notransfer)buffer.delete(0, matchEnd);
 						return i;
 					}
 				}
@@ -331,8 +347,26 @@ public class Expect {
 	public int expectEOF() {
 		return expectEOF(default_timeout);
 	}
+	
+	/**
+	 * Throws checked exceptions when expectEOF was not successful.
+	 */
+	public int expectEOFOrThrow(int timeout) throws TimeoutException,
+			IOException {
+		int retv = expectEOF(timeout);
+		if (retv == RETV_TIMEOUT)
+			throw new TimeoutException();
+		if (retv == RETV_IOEXCEPTION)
+			throw thrownIOE;
+		return retv;
+	}
+	/**Convenience method, same as calling {@link #expectEOF(int)
+	 * expectEOF(default_timeout)}*/
+	public int expectEOFOrThrow() throws TimeoutException, IOException {
+		return expectEOFOrThrow(default_timeout);
+	}
 
-	/**useful when calling chkExpect()*/
+	/**useful when calling {@link #expectOrThrow(int, Object...)}*/
 	private IOException thrownIOE;
 	
 	/**
@@ -354,7 +388,7 @@ public class Expect {
 	 *             when there is a problem reading from the InputStream
 	 * @return same as {@link #expect(int, Object...) expect(timeout, patterns)}
 	 */
-	public int chkExpect(int timeout, Object... patterns)
+	public int expectOrThrow(int timeout, Object... patterns)
 			throws TimeoutException, EOFException, IOException {
 		int retv = expect(timeout, patterns);
 		switch (retv) {
@@ -368,11 +402,11 @@ public class Expect {
 			return retv;
 		}
 	}
-	/**Convenience method, same as calling {@link #chkExpect(int, Object...)
-	 * chkExpect(default_timeout, patterns)}*/
-	public int chkExpect(Object... patterns) throws TimeoutException,
+	/**Convenience method, same as calling {@link #expectOrThrow(int, Object...)
+	 * expectOrThrow(default_timeout, patterns)}*/
+	public int expectOrThrow(Object... patterns) throws TimeoutException,
 			EOFException, IOException {
-		return chkExpect(default_timeout, patterns);
+		return expectOrThrow(default_timeout, patterns);
 	}
 	
 	private void clearGlobalVariables() {
@@ -418,6 +452,12 @@ public class Expect {
 	}
 	public void setRestart_timeout_upon_receive(boolean restart_timeout_upon_receive) {
 		this.restart_timeout_upon_receive = restart_timeout_upon_receive;
+	}
+	public void setNotransfer(boolean notransfer) {
+		this.notransfer = notransfer;
+	}
+	public boolean isNotransfer() {
+		return notransfer;
 	}
 
 	/**
@@ -474,6 +514,26 @@ public class Expect {
 	public static void turnOffLogging(){
 		log.setLevel(Level.OFF);
 		log.removeAllAppenders();
+	}
+	
+	private static PrintStream duplicatedTo = null;
+	/**
+	 * While performing expect operations on the InputStream provided, duplicate
+	 * the contents obtained from InputStream to a PrintStream (you can use
+	 * System.err or System.out). <b>DO NOT</b> call this function while there
+	 * are live Expect objects as this may cause the piping thread to end due to
+	 * unsynchronized code; if you need this feature, add the following to both
+	 * {@link #inputStreamToSelectableChannel(InputStream)} and
+	 * {@link #forwardInputStreamTo(PrintStream)}:
+	 * <pre>
+	 * {@code
+	 * 	synchronized(Expect.duplicatedTo) {...}
+	 * </pre>
+	 * @param duplicatedTo
+	 *            call with null if you want to turn off
+	 */
+	public static void forwardInputStreamTo(PrintStream duplicatedTo) {
+		Expect.duplicatedTo = duplicatedTo;
 	}
 
 }
