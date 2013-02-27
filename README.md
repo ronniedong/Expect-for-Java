@@ -13,7 +13,7 @@ In order to use this tool, you need to know Java regular expressions and have so
 Dependencies
 ------------
 Expect.java:  
-[log4j-1.2.X.jar](http://archive.apache.org/dist/logging/log4j/1.2.17/log4j-1.2.17.jar)
+[slf4j-api.jar](http://www.slf4j.org/download.html)
 
 TestExpect.java:  
 [junit-4.X.jar](http://cloud.github.com/downloads/KentBeck/junit/junit-4.10.jar)
