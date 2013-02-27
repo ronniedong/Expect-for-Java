@@ -12,12 +12,8 @@ import java.util.List;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 
-import org.apache.log4j.ConsoleAppender;
-import org.apache.log4j.FileAppender;
-import org.apache.log4j.Layout;
-import org.apache.log4j.Level;
-import org.apache.log4j.Logger;
-import org.apache.log4j.PatternLayout;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 
 
 /**
@@ -45,11 +41,7 @@ import org.apache.log4j.PatternLayout;
  * @version 1.1
  */
 public class Expect {
-	static final Logger log = Logger.getLogger(Expect.class);
-	/**Logging is turned off by default.*/
-	static {
-		log.setLevel(Level.OFF);
-	}
+	private static final Logger log = LoggerFactory.getLogger(Expect.class);
 	
 	private OutputStream output;
 	private Pipe.SourceChannel inputChannel;
@@ -62,7 +54,7 @@ public class Expect {
 			selector = Selector.open();
 			inputChannel.register(selector, SelectionKey.OP_READ);
 		} catch (IOException e) {
-			log.fatal("Fatal error when initializing pipe or selector", e);
+			log.error("Fatal error when initializing pipe or selector", e);
 			//e.printStackTrace();
 		}
 		this.output = output;
@@ -494,26 +486,6 @@ public class Expect {
 	}
 	@SuppressWarnings("serial")
 	public static class EOFException extends Exception{
-	}
-	
-	private static Layout layout = new PatternLayout(
-			PatternLayout.TTCC_CONVERSION_PATTERN);
-
-	public static void addLogToConsole(Level level) {
-		log.setLevel(Level.ALL);
-		ConsoleAppender console = new ConsoleAppender(layout);
-		console.setThreshold(level);
-		log.addAppender(console);
-	}
-	public static void addLogToFile(String filename, Level level) throws IOException {
-		log.setLevel(Level.ALL);
-		FileAppender file = new FileAppender(layout, filename);
-		file.setThreshold(level);
-		log.addAppender(file);
-	}
-	public static void turnOffLogging(){
-		log.setLevel(Level.OFF);
-		log.removeAllAppenders();
 	}
 	
 	private static PrintStream duplicatedTo = null;
