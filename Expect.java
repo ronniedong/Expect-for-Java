@@ -192,6 +192,9 @@ public class Expect {
 	/**String representing the last match(if there was a match),
 	 *  updated after each expect() call*/
 	public String match;
+	/**String containing the full output of the last sent command,
+	 *  updated after each expect() call*/
+	public String fullOutput;
 	/**Whether the last match was successful,
 	 *  updated after each expect() call*/
 	public boolean isSuccess = false;
@@ -264,6 +267,8 @@ public class Expect {
 			ByteBuffer bytes = ByteBuffer.allocate(1024);
 			int n;
 			while (true) {
+				this.fullOutput = buffer.toString();
+
 				for (int i = 0; i < list.size(); i++) {
 					log.trace("trying to match " + list.get(i)
 							+ " against buffer \"" + buffer + "\"");
@@ -413,6 +418,8 @@ public class Expect {
 		isSuccess = false;
 		match = null;
 		before = null;
+		fullOutput = null;
+		buffer.setLength(0);
 	}
 	
 	/**
