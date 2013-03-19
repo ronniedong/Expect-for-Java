@@ -1,3 +1,5 @@
+package com.successehs.direct.mailserver.admin;
+
 import java.io.IOException;
 import java.io.InputStream;
 import java.io.OutputStream;
@@ -173,10 +175,10 @@ public class Expect {
 		}
 	}
 
-	private int default_timeout = 60;
-	private boolean restart_timeout_upon_receive = false;
+	private int defaultTimeout = 60;
+	private boolean restartTimeoutUponReceive = false;
 	private StringBuffer buffer = new StringBuffer();
-	private boolean notransfer = false;
+	private boolean noTransfer = false;
 	
 	/**String before the last match(if there was a match),
 	 *  updated after each expect() call*/
@@ -199,7 +201,7 @@ public class Expect {
 	 * @return
 	 */
 	public int expect(Object... patterns) {
-		return expect(default_timeout, patterns);
+		return expect(defaultTimeout, patterns);
 	}
 
 	/**
@@ -266,13 +268,13 @@ public class Expect {
 						this.before = buffer.substring(0, matchStart);
 						this.match = m.group();
 						this.isSuccess = true;
-						if(!notransfer)buffer.delete(0, matchEnd);
+						if(!noTransfer)buffer.delete(0, matchEnd);
 						return i;
 					}
 				}
 
 				long waitTime = endTime - System.currentTimeMillis();
-				if (restart_timeout_upon_receive)
+				if (restartTimeoutUponReceive)
 					waitTime = timeout * 1000;
 				if (waitTime <= 0) {
 					log.debug("Timeout when expecting " + list);
@@ -337,7 +339,7 @@ public class Expect {
 	/**Convenience method, same as calling {@link #expectEOF(int)
 	 * expectEOF(default_timeout)}*/
 	public int expectEOF() {
-		return expectEOF(default_timeout);
+		return expectEOF(defaultTimeout);
 	}
 	
 	/**
@@ -355,7 +357,7 @@ public class Expect {
 	/**Convenience method, same as calling {@link #expectEOF(int)
 	 * expectEOF(default_timeout)}*/
 	public int expectEOFOrThrow() throws TimeoutException, IOException {
-		return expectEOFOrThrow(default_timeout);
+		return expectEOFOrThrow(defaultTimeout);
 	}
 
 	/**useful when calling {@link #expectOrThrow(int, Object...)}*/
@@ -398,7 +400,7 @@ public class Expect {
 	 * expectOrThrow(default_timeout, patterns)}*/
 	public int expectOrThrow(Object... patterns) throws TimeoutException,
 			EOFException, IOException {
-		return expectOrThrow(default_timeout, patterns);
+		return expectOrThrow(defaultTimeout, patterns);
 	}
 	
 	private void clearGlobalVariables() {
@@ -433,23 +435,23 @@ public class Expect {
 		}
 	}
 	
-	public int getDefault_timeout() {
-		return default_timeout;
+	public int getDefaultTimeout() {
+		return defaultTimeout;
 	}
-	public void setDefault_timeout(int default_timeout) {
-		this.default_timeout = default_timeout;
+	public void setDefaultTimeout(int defaultTimeout) {
+		this.defaultTimeout = defaultTimeout;
 	}
-	public boolean isRestart_timeout_upon_receive() {
-		return restart_timeout_upon_receive;
+	public boolean isRestartTimeoutUponReceive() {
+		return restartTimeoutUponReceive;
 	}
-	public void setRestart_timeout_upon_receive(boolean restart_timeout_upon_receive) {
-		this.restart_timeout_upon_receive = restart_timeout_upon_receive;
+	public void setRestartTimeoutUponReceive(boolean restartTimeoutUponReceive) {
+		this.restartTimeoutUponReceive = restartTimeoutUponReceive;
 	}
-	public void setNotransfer(boolean notransfer) {
-		this.notransfer = notransfer;
+	public void setNoTransfer(boolean noTransfer) {
+		this.noTransfer = noTransfer;
 	}
 	public boolean isNotransfer() {
-		return notransfer;
+		return noTransfer;
 	}
 
 	/**
