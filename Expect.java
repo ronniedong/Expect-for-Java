@@ -258,7 +258,7 @@ public class Expect {
 		log.debug("Expecting " + list);
 		
 		clearGlobalVariables();
-		long endTime = System.currentTimeMillis() + timeout * 1000;
+		long endTime = System.currentTimeMillis() + (long)timeout * 1000;
 		
 		try {
 			ByteBuffer bytes = ByteBuffer.allocate(1024);
