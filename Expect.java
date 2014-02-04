@@ -1,3 +1,5 @@
+package com.successehs.direct.mailserver.admin;
+
 import java.io.IOException;
 import java.io.InputStream;
 import java.io.OutputStream;
@@ -12,12 +14,8 @@ import java.util.List;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 
-import org.apache.log4j.ConsoleAppender;
-import org.apache.log4j.FileAppender;
-import org.apache.log4j.Layout;
-import org.apache.log4j.Level;
-import org.apache.log4j.Logger;
-import org.apache.log4j.PatternLayout;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 
 
 /**
@@ -45,11 +43,7 @@ import org.apache.log4j.PatternLayout;
  * @version 1.1
  */
 public class Expect {
-	static final Logger log = Logger.getLogger(Expect.class);
-	/**Logging is turned off by default.*/
-	static {
-		log.setLevel(Level.OFF);
-	}
+	private static final Logger log = LoggerFactory.getLogger(Expect.class);
 	
 	private OutputStream output;
 	private Pipe.SourceChannel inputChannel;
@@ -62,7 +56,7 @@ public class Expect {
 			selector = Selector.open();
 			inputChannel.register(selector, SelectionKey.OP_READ);
 		} catch (IOException e) {
-			log.fatal("Fatal error when initializing pipe or selector", e);
+			log.error("Fatal error when initializing pipe or selector", e);
 			//e.printStackTrace();
 		}
 		this.output = output;
@@ -181,10 +175,10 @@ public class Expect {
 		}
 	}
 
-	private int default_timeout = 60;
-	private boolean restart_timeout_upon_receive = false;
+	private int defaultTimeout = 60;
+	private boolean restartTimeoutUponReceive = false;
 	private StringBuffer buffer = new StringBuffer();
-	private boolean notransfer = false;
+	private boolean noTransfer = false;
 	
 	/**String before the last match(if there was a match),
 	 *  updated after each expect() call*/
@@ -207,7 +201,7 @@ public class Expect {
 	 * @return
 	 */
 	public int expect(Object... patterns) {
-		return expect(default_timeout, patterns);
+		return expect(defaultTimeout, patterns);
 	}
 
 	/**
@@ -274,13 +268,13 @@ public class Expect {
 						this.before = buffer.substring(0, matchStart);
 						this.match = m.group();
 						this.isSuccess = true;
-						if(!notransfer)buffer.delete(0, matchEnd);
+						if(!noTransfer)buffer.delete(0, matchEnd);
 						return i;
 					}
 				}
 
 				long waitTime = endTime - System.currentTimeMillis();
-				if (restart_timeout_upon_receive)
+				if (restartTimeoutUponReceive)
 					waitTime = timeout * 1000;
 				if (waitTime <= 0) {
 					log.debug("Timeout when expecting " + list);
@@ -345,7 +339,7 @@ public class Expect {
 	/**Convenience method, same as calling {@link #expectEOF(int)
 	 * expectEOF(default_timeout)}*/
 	public int expectEOF() {
-		return expectEOF(default_timeout);
+		return expectEOF(defaultTimeout);
 	}
 	
 	/**
@@ -363,7 +357,7 @@ public class Expect {
 	/**Convenience method, same as calling {@link #expectEOF(int)
 	 * expectEOF(default_timeout)}*/
 	public int expectEOFOrThrow() throws TimeoutException, IOException {
-		return expectEOFOrThrow(default_timeout);
+		return expectEOFOrThrow(defaultTimeout);
 	}
 
 	/**useful when calling {@link #expectOrThrow(int, Object...)}*/
@@ -406,7 +400,7 @@ public class Expect {
 	 * expectOrThrow(default_timeout, patterns)}*/
 	public int expectOrThrow(Object... patterns) throws TimeoutException,
 			EOFException, IOException {
-		return expectOrThrow(default_timeout, patterns);
+		return expectOrThrow(defaultTimeout, patterns);
 	}
 	
 	private void clearGlobalVariables() {
@@ -441,23 +435,23 @@ public class Expect {
 		}
 	}
 	
-	public int getDefault_timeout() {
-		return default_timeout;
+	public int getDefaultTimeout() {
+		return defaultTimeout;
 	}
-	public void setDefault_timeout(int default_timeout) {
-		this.default_timeout = default_timeout;
+	public void setDefaultTimeout(int defaultTimeout) {
+		this.defaultTimeout = defaultTimeout;
 	}
-	public boolean isRestart_timeout_upon_receive() {
-		return restart_timeout_upon_receive;
+	public boolean isRestartTimeoutUponReceive() {
+		return restartTimeoutUponReceive;
 	}
-	public void setRestart_timeout_upon_receive(boolean restart_timeout_upon_receive) {
-		this.restart_timeout_upon_receive = restart_timeout_upon_receive;
+	public void setRestartTimeoutUponReceive(boolean restartTimeoutUponReceive) {
+		this.restartTimeoutUponReceive = restartTimeoutUponReceive;
 	}
-	public void setNotransfer(boolean notransfer) {
-		this.notransfer = notransfer;
+	public void setNoTransfer(boolean noTransfer) {
+		this.noTransfer = noTransfer;
 	}
 	public boolean isNotransfer() {
-		return notransfer;
+		return noTransfer;
 	}
 
 	/**
@@ -494,26 +488,6 @@ public class Expect {
 	}
 	@SuppressWarnings("serial")
 	public static class EOFException extends Exception{
-	}
-	
-	private static Layout layout = new PatternLayout(
-			PatternLayout.TTCC_CONVERSION_PATTERN);
-
-	public static void addLogToConsole(Level level) {
-		log.setLevel(Level.ALL);
-		ConsoleAppender console = new ConsoleAppender(layout);
-		console.setThreshold(level);
-		log.addAppender(console);
-	}
-	public static void addLogToFile(String filename, Level level) throws IOException {
-		log.setLevel(Level.ALL);
-		FileAppender file = new FileAppender(layout, filename);
-		file.setThreshold(level);
-		log.addAppender(file);
-	}
-	public static void turnOffLogging(){
-		log.setLevel(Level.OFF);
-		log.removeAllAppenders();
 	}
 	
 	private static PrintStream duplicatedTo = null;
