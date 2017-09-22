@@ -94,10 +94,15 @@ public class Expect {
 				byte[] buffer = new byte[1024];
 				try {
 					for (int n = 0; n != -1; n = input.read(buffer)) {
-						out.write(buffer, 0, n);
-						if (duplicatedTo != null) {
-							String toWrite = new String(buffer, 0, n);
-							duplicatedTo.append(toWrite);	// no Exception will be thrown
+						// if don't check to see if channel is still open to write to - Broken Pipe Exception will be thrown
+						if (pipe.source().isOpen()) {
+							out.write(buffer, 0, n);
+							if (duplicatedTo != null) {
+								String toWrite = new String(buffer, 0, n);
+								duplicatedTo.append(toWrite);	// no Exception will be thrown
+							}
+						} else {
+							log.warn("Socket Channel is no longer open to write " + new String(buffer));
 						}
 					}
 					log.debug("EOF from InputStream");
