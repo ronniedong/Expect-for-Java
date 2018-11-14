@@ -7,6 +7,7 @@ import java.nio.channels.Channels;
 import java.nio.channels.Pipe;
 import java.nio.channels.SelectionKey;
 import java.nio.channels.Selector;
+import java.nio.channels.Pipe.SinkChannel;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.regex.Matcher;
@@ -86,10 +87,18 @@ public class Expect {
 			final InputStream input) throws IOException {
 		Pipe pipe = Pipe.open();
 		pipe.source().configureBlocking(false);
-		final OutputStream out = Channels.newOutputStream(pipe.sink());
-		Thread piping = new Thread(new Runnable() {
+                
+		class OneShotTask implements Runnable {
+			
+			SinkChannel sink;
+        	        InputStream input;
+                        OneShotTask(SinkChannel s, InputStream in) { sink = s; input=in; }
+
 			@Override
 			public void run() {
+				
+				final OutputStream out = Channels.newOutputStream(pipe.sink());
+				
 				//LOG
 				byte[] buffer = new byte[1024];
 				try {
@@ -115,7 +124,8 @@ public class Expect {
 					}
 				}
 			}
-		});
+		}
+		Thread piping = new Thread(new OneShotTask(pipe.sink(), input));
 		piping.setName("Piping InputStream to SelectableChannel Thread");
 		piping.setDaemon(true);
 		piping.start();
