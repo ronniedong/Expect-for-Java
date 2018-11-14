@@ -281,7 +281,7 @@ public class Expect {
 
 				long waitTime = endTime - System.currentTimeMillis();
 				if (restart_timeout_upon_receive)
-					waitTime = timeout * 1000;
+					waitTime = (long) (timeout * 1000);
 				if (waitTime <= 0) {
 					log.debug("Timeout when expecting " + list);
 					return RETV_TIMEOUT;
